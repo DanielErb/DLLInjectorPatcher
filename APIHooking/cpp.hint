@@ -1,0 +1,2 @@
+#define APIHOOKING_API __declspec(dllexport)
+#define APIHOOKING_API __declspec(dllimport)
