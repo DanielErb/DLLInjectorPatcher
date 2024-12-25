@@ -17,6 +17,8 @@ public:
 	// TODO: add your methods here.
 };
 
+
+
 extern APIHOOKING_API int nAPIHooking;
 
 APIHOOKING_API int fnAPIHooking(void);

