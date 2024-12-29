@@ -12,7 +12,7 @@ void injectToProcess(int pid, const char* injectedDLLName);
 int main(int argc, char** argv)
 {
 	int pid;
-	const char* procname = "Taskmgr.exe";
+	const char* procname = "explorer.exe";
 	const char* injectDLLName = "C:\\Users\\Daniel\\Documents\\University\\Advanced topics in malware\\DllPatcher\\Injector\\x64\\Debug\\APIHooking.dll";
 	if (argc == 2) {
 		pid = atoi(argv[1]);
