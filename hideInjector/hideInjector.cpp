@@ -4,16 +4,18 @@
 #include <iostream>
 #include <Windows.h>
 #include <tlhelp32.h>
+#include <psapi.h>
 
 int find_pid(const char* procname);
 void injectToProcess(int pid, const char* injectedDLLName);
+HMODULE getRemoteDLLModuleHandle(HANDLE hProcess, char* injectDLLName);
 
 
 int main(int argc, char** argv)
 {
 	int pid;
 	const char* procname = "Taskmgr.exe";
-	const char* injectDLLName = "C:\\Users\\Daniel\\Documents\\University\\Advanced topics in malware\\DllPatcher\\Injector\\x64\\Debug\\APIHooking.dll";
+	const char* injectDLLName = "APIHooking.dll";
 	if (argc == 2) {
 		pid = atoi(argv[1]);
 	}
@@ -45,30 +47,37 @@ int find_pid(const char* procname) {
 	return 0;
 }
 
+HMODULE getRemoteDLLModuleHandle(HANDLE hProcess, char* injectDLLName) {
+	HMODULE hModules[1024];
+	DWORD lpcbNeeded;
+	if (EnumProcessModules(hProcess, hModules, sizeof(hModules), &lpcbNeeded)) {
+		for (int i = 0; i < lpcbNeeded / sizeof(HMODULE); i++) {
+			char szModName[MAX_PATH];
+			if (GetModuleBaseNameA(hProcess, hModules[i], szModName, sizeof(szModName))) {
+				if (strcmp(szModName, injectDLLName) == 0) {
+					return hModules[i];
+				}
+			}
+
+		}
+	}
+	return NULL;
+
+}
+
 void injectToProcess(int pid, const char* injectedDLLName) {
 	HMODULE kernelDLL = GetModuleHandle("Kernel32.dll");
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-	LPVOID lpAddress = VirtualAllocEx(hProcess, NULL, strlen(injectedDLLName) + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	if (lpAddress == NULL) {
-		std::cout << "Failed to allocate memory in process" << std::endl;
-		return;
-	}
-	SIZE_T written;
-	WriteProcessMemory(hProcess, lpAddress, (LPVOID)injectedDLLName, strlen(injectedDLLName) + 1, &written);
-	if (written != strlen(injectedDLLName) + 1) {
-		std::cout << "Failed to write to process memory" << std::endl;
-		return;
-	}
-	LPTHREAD_START_ROUTINE loadLibrary = (LPTHREAD_START_ROUTINE)GetProcAddress(kernelDLL, "LoadLibraryA");
+	LPTHREAD_START_ROUTINE loadLibrary = (LPTHREAD_START_ROUTINE)GetProcAddress(kernelDLL, "FreeLibrary");
+	HMODULE hModule = getRemoteDLLModuleHandle(hProcess, (char*)injectedDLLName);
 	DWORD threadID;
-	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, loadLibrary, lpAddress, 0, (LPDWORD)&threadID);
+	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, loadLibrary, hModule, 0, (LPDWORD)&threadID);
 	if (hThread == NULL) {
 		std::cout << "Failed to create remote thread" << std::endl;
 		return;
 	}
-	std::cout << "Injected successfully" << std::endl;
+	std::cout << "Removed successfully" << std::endl;
 	std::cout << "Thread ID: " << threadID << std::endl;
 	CloseHandle(hThread);
-	VirtualFreeEx(hProcess, lpAddress, 0, MEM_RELEASE);
 	CloseHandle(hProcess);
 }
